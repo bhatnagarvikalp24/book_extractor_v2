@@ -1,59 +1,14 @@
 version: "3.9"
 
 services:
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
   backend:
     build: ./backend
     restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
-      - REDIS_URL=redis://redis:6379/0
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - JOB_TTL=${JOB_TTL:-3600}
-    depends_on:
-      redis:
-        condition: service_healthy
-    volumes:
-      - pdf_jobs:/tmp/pdf_jobs
-
-  worker:
-    build: ./backend
-    restart: unless-stopped
-    command: >
-      celery -A app.celery_app worker
-      --loglevel=info
-      --concurrency=4
-      -Q celery
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - JOB_TTL=${JOB_TTL:-3600}
-    depends_on:
-      redis:
-        condition: service_healthy
-    volumes:
-      - pdf_jobs:/tmp/pdf_jobs
-
-  beat:
-    build: ./backend
-    restart: unless-stopped
-    command: celery -A app.celery_app beat --loglevel=info
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-    depends_on:
-      redis:
-        condition: service_healthy
 
   frontend:
     build: ./frontend
@@ -64,6 +19,3 @@ services:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
     depends_on:
       - backend
-
-volumes:
-  pdf_jobs:

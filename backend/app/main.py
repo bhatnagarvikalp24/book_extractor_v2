@@ -1,10 +1,15 @@
+import asyncio
 import csv
 import io
 import json
 import os
 import re
+import shutil
+import time
 import uuid
-from typing import List
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
+from typing import Any, Dict, List
 
 import aiofiles
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
@@ -12,8 +17,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from app.config import JOB_TTL, MAX_FILE_SIZE, MAX_FILES, TMP_DIR
-from app.redis_client import redis_client
-from app.tasks import process_pdf
 
 app = FastAPI(title="PDF Metadata Extractor")
 
@@ -23,6 +26,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── In-memory job store (no Redis required) ───────────────────────────────────
+
+_jobs: Dict[str, Dict[str, Any]] = {}
+_jobs_lock = Lock()
+_executor = ThreadPoolExecutor(max_workers=4)
 
 SAFE_NAME_RE = re.compile(r"[^\w\s.\-]")
 
@@ -34,16 +43,55 @@ def _safe_filename(name: str) -> str:
 
 
 def _get_job(job_id: str) -> dict:
-    raw = redis_client.get(f"job:{job_id}")
-    if not raw:
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found or expired")
-    return json.loads(raw)
+    return job
+
+
+def _cleanup_old_jobs() -> None:
+    cutoff = time.time() - JOB_TTL
+    with _jobs_lock:
+        stale = [jid for jid, j in _jobs.items() if j.get("created_at", 0) < cutoff]
+        for jid in stale:
+            _jobs.pop(jid, None)
+            job_dir = os.path.join(TMP_DIR, jid)
+            shutil.rmtree(job_dir, ignore_errors=True)
+
+
+def _run_extraction(job_id: str, file_name: str, pdf_path: str) -> None:
+    """Run in a thread-pool worker. Updates the in-memory job state when done."""
+    from app.extraction.heuristics import extract_metadata
+
+    try:
+        result = extract_metadata(pdf_path, file_name)
+    except Exception as exc:
+        result = {
+            "file_name": file_name,
+            "title": None, "author": None, "publisher": None,
+            "isbn": None, "copyright_holder": "unknown",
+            "confidence": 0.0, "needs_review": True,
+            "llm_used": False, "evidence": {}, "error": str(exc),
+        }
+
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if job:
+            job["results"].append(result)
+            job["processed_files"] += 1
+            if job["processed_files"] >= job["total_files"]:
+                job["status"] = "done"
+                # Clean up temp files
+                shutil.rmtree(os.path.join(TMP_DIR, job_id), ignore_errors=True)
 
 
 # ── endpoints ─────────────────────────────────────────────────────────────────
 
 @app.post("/extract", status_code=202)
 async def create_extract_job(files: List[UploadFile] = File(...)):
+    _cleanup_old_jobs()
+
     if not files:
         raise HTTPException(400, "No files provided")
     if len(files) > MAX_FILES:
@@ -62,11 +110,10 @@ async def create_extract_job(files: List[UploadFile] = File(...)):
         content = await upload.read()
         if len(content) > MAX_FILE_SIZE:
             raise HTTPException(
-                400, f"'{upload.filename}' exceeds the 20 MB size limit"
+                400, f"'{upload.filename}' exceeds the {MAX_FILE_SIZE // (1024*1024)} MB size limit"
             )
 
         safe_name = _safe_filename(upload.filename or "file.pdf")
-        # Deduplicate filenames within the same job
         dest = os.path.join(job_dir, safe_name)
         if os.path.exists(dest):
             base, ext = os.path.splitext(safe_name)
@@ -77,19 +124,20 @@ async def create_extract_job(files: List[UploadFile] = File(...)):
             await fp.write(content)
         saved.append((safe_name, dest))
 
-    # Initialise Redis job state
-    job_state = {
-        "status": "queued",
-        "total_files": len(saved),
-        "processed_files": 0,
-        "results": [],
-        "errors": [],
-    }
-    redis_client.set(f"job:{job_id}", json.dumps(job_state), ex=JOB_TTL)
+    # Create job state
+    with _jobs_lock:
+        _jobs[job_id] = {
+            "status": "running",
+            "total_files": len(saved),
+            "processed_files": 0,
+            "results": [],
+            "created_at": time.time(),
+        }
 
-    # Enqueue one Celery task per file
-    for idx, (name, path) in enumerate(saved):
-        process_pdf.apply_async(args=[job_id, name, path, idx])
+    # Submit extraction tasks to thread pool
+    loop = asyncio.get_event_loop()
+    for name, path in saved:
+        loop.run_in_executor(_executor, _run_extraction, job_id, name, path)
 
     return {"job_id": job_id}
 
@@ -110,7 +158,6 @@ def get_results(job_id: str):
     return {
         "status": job["status"],
         "results": job.get("results", []),
-        "errors": job.get("errors", []),
     }
 
 
@@ -129,24 +176,14 @@ def export_results(job_id: str, format: str = Query("csv", pattern="^(csv|json)$
             },
         )
 
-    # CSV
     output = io.StringIO()
     fieldnames = [
-        "file_name",
-        "title",
-        "author",
-        "publisher",
-        "isbn",
-        "copyright_holder",
-        "confidence",
-        "llm_used",
-        "needs_review",
-        "error",
+        "file_name", "title", "author", "publisher", "isbn",
+        "copyright_holder", "confidence", "llm_used", "needs_review", "error",
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
     writer.writeheader()
     for row in results:
-        # Flatten booleans for CSV readability
         flat = dict(row)
         flat["llm_used"] = "yes" if flat.get("llm_used") else "no"
         flat["needs_review"] = "yes" if flat.get("needs_review") else "no"
