@@ -36,3 +36,10 @@ backend/dump.rdb
 
 # Claude settings
 .claude/
+
+# Build artifacts
+backend/build_venv/
+backend/build/
+backend/dist/
+backend/app/_baked_keys.py
+frontend/out/

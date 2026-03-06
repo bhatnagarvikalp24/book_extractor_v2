@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -15,6 +16,7 @@ import aiofiles
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.config import JOB_TTL, MAX_FILE_SIZE, MAX_FILES, TMP_DIR
 
@@ -201,3 +203,20 @@ def export_results(job_id: str, format: str = Query("csv", pattern="^(csv|json)$
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# ── Serve the static frontend (must come last) ────────────────────────────────
+
+def _find_frontend_dir() -> str:
+    """Locate the bundled frontend/out dir whether running frozen or from source."""
+    if getattr(sys, "frozen", False):
+        # PyInstaller extracts data to sys._MEIPASS
+        return os.path.join(sys._MEIPASS, "frontend_out")  # type: ignore[attr-defined]
+    # Running from source: backend/app/main.py → backend/ → project root
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(project_root, "frontend", "out")
+
+
+_frontend_dir = _find_frontend_dir()
+if os.path.isdir(_frontend_dir):
+    app.mount("/", StaticFiles(directory=_frontend_dir, html=True), name="frontend")
