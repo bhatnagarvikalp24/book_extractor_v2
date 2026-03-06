@@ -1,13 +1,13 @@
 name: Build Desktop App
 
-# Trigger manually from GitHub → Actions tab → "Build Desktop App" → Run workflow
+# Trigger manually: GitHub → Actions → "Build Desktop App" → Run workflow
 on:
   workflow_dispatch:
 
 jobs:
-  # ── Mac build ────────────────────────────────────────────────────────────────
-  build-mac:
-    runs-on: macos-latest
+  # ── macOS arm64 (Apple Silicon M1/M2/M3) ────────────────────────────────────
+  build-mac-arm64:
+    runs-on: macos-latest   # macOS 15, arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -17,19 +17,17 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.11"   # python.org build — no Homebrew dylib deps
 
       - name: Build frontend
         run: |
-          cd frontend
-          npm ci
-          npm run build
+          cd frontend && npm ci && npm run build
 
       - name: Install Python dependencies
         run: |
           cd backend
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller delocate
 
       - name: Bake API key
         env:
@@ -42,34 +40,34 @@ jobs:
               f.write(f'# Auto-generated — DO NOT COMMIT\nOPENAI_API_KEY = \"{key}\"\n')
           "
 
-      - name: Build with PyInstaller
+      - name: Build .app with PyInstaller
         run: |
           cd backend
           rm -rf build/
-          pyinstaller isbn_scanner.spec --noconfirm
+          pyinstaller isbn_scanner_mac.spec --noconfirm
+
+      - name: Fix dylib references with delocate
+        run: |
+          delocate-path "backend/dist/ISBNScanner.app" -v 2>&1 | tail -20
 
       - name: Remove secret file
         if: always()
         run: rm -f backend/app/_baked_keys.py
 
-      - name: Zip Mac build
+      - name: Zip .app bundle
         run: |
           cd backend/dist
-          zip -r ../../ISBNScanner-Mac.zip ISBNScanner/
+          zip -r --symlinks ../../ISBNScanner-Mac-arm64.zip ISBNScanner.app/
 
-      - name: Upload Mac artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: ISBNScanner-Mac
-          path: ISBNScanner-Mac.zip
+          name: ISBNScanner-Mac-arm64
+          path: ISBNScanner-Mac-arm64.zip
           retention-days: 30
 
-  # ── Windows build ────────────────────────────────────────────────────────────
-  build-windows:
-    runs-on: windows-latest
-    defaults:
-      run:
-        shell: bash   # use bash on Windows for consistent scripting
+  # ── macOS x86_64 (Intel) ─────────────────────────────────────────────────────
+  build-mac-intel:
+    runs-on: macos-13       # macOS 13, x86_64 (Intel)
     steps:
       - uses: actions/checkout@v4
 
@@ -83,9 +81,70 @@ jobs:
 
       - name: Build frontend
         run: |
-          cd frontend
-          npm ci
-          npm run build
+          cd frontend && npm ci && npm run build
+
+      - name: Install Python dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+          pip install pyinstaller delocate
+
+      - name: Bake API key
+        env:
+          OPENAI_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python -c "
+          import os
+          key = os.environ['OPENAI_KEY']
+          with open('backend/app/_baked_keys.py', 'w') as f:
+              f.write(f'# Auto-generated — DO NOT COMMIT\nOPENAI_API_KEY = \"{key}\"\n')
+          "
+
+      - name: Build .app with PyInstaller
+        run: |
+          cd backend
+          rm -rf build/
+          pyinstaller isbn_scanner_mac.spec --noconfirm
+
+      - name: Fix dylib references with delocate
+        run: |
+          delocate-path "backend/dist/ISBNScanner.app" -v 2>&1 | tail -20
+
+      - name: Remove secret file
+        if: always()
+        run: rm -f backend/app/_baked_keys.py
+
+      - name: Zip .app bundle
+        run: |
+          cd backend/dist
+          zip -r --symlinks ../../ISBNScanner-Mac-Intel.zip ISBNScanner.app/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ISBNScanner-Mac-Intel
+          path: ISBNScanner-Mac-Intel.zip
+          retention-days: 30
+
+  # ── Windows x86_64 ───────────────────────────────────────────────────────────
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build frontend
+        run: |
+          cd frontend && npm ci && npm run build
 
       - name: Install Python dependencies
         run: |
@@ -119,8 +178,7 @@ jobs:
           cd backend/dist
           powershell Compress-Archive -Path ISBNScanner -DestinationPath ..\\..\\ISBNScanner-Windows.zip
 
-      - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: ISBNScanner-Windows
           path: ISBNScanner-Windows.zip
