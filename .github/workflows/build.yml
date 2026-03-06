@@ -1,0 +1,127 @@
+name: Build Desktop App
+
+# Trigger manually from GitHub → Actions tab → "Build Desktop App" → Run workflow
+on:
+  workflow_dispatch:
+
+jobs:
+  # ── Mac build ────────────────────────────────────────────────────────────────
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Install Python dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Bake API key
+        env:
+          OPENAI_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python -c "
+          import os
+          key = os.environ['OPENAI_KEY']
+          with open('backend/app/_baked_keys.py', 'w') as f:
+              f.write(f'# Auto-generated — DO NOT COMMIT\nOPENAI_API_KEY = \"{key}\"\n')
+          "
+
+      - name: Build with PyInstaller
+        run: |
+          cd backend
+          rm -rf build/
+          pyinstaller isbn_scanner.spec --noconfirm
+
+      - name: Remove secret file
+        if: always()
+        run: rm -f backend/app/_baked_keys.py
+
+      - name: Zip Mac build
+        run: |
+          cd backend/dist
+          zip -r ../../ISBNScanner-Mac.zip ISBNScanner/
+
+      - name: Upload Mac artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ISBNScanner-Mac
+          path: ISBNScanner-Mac.zip
+          retention-days: 30
+
+  # ── Windows build ────────────────────────────────────────────────────────────
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash   # use bash on Windows for consistent scripting
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Install Python dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Bake API key
+        env:
+          OPENAI_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python -c "
+          import os
+          key = os.environ['OPENAI_KEY']
+          with open('backend/app/_baked_keys.py', 'w') as f:
+              f.write(f'# Auto-generated — DO NOT COMMIT\nOPENAI_API_KEY = \"{key}\"\n')
+          "
+
+      - name: Build with PyInstaller
+        run: |
+          cd backend
+          rm -rf build/
+          pyinstaller isbn_scanner.spec --noconfirm
+
+      - name: Remove secret file
+        if: always()
+        run: rm -f backend/app/_baked_keys.py
+
+      - name: Zip Windows build
+        run: |
+          cd backend/dist
+          powershell Compress-Archive -Path ISBNScanner -DestinationPath ..\\..\\ISBNScanner-Windows.zip
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ISBNScanner-Windows
+          path: ISBNScanner-Windows.zip
+          retention-days: 30
