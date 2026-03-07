@@ -157,8 +157,10 @@ jobs:
           OPENAI_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           python -c "
-          import os
+          import os, json
           key = os.environ['OPENAI_KEY']
+          with open('backend/app/_baked_keys.json', 'w') as f:
+              json.dump({'OPENAI_API_KEY': key}, f)
           with open('backend/app/_baked_keys.py', 'w') as f:
               f.write(f'# Auto-generated — DO NOT COMMIT\nOPENAI_API_KEY = \"{key}\"\n')
           "
@@ -169,9 +171,9 @@ jobs:
           rm -rf build/
           pyinstaller isbn_scanner.spec --noconfirm
 
-      - name: Remove secret file
+      - name: Remove secret files
         if: always()
-        run: rm -f backend/app/_baked_keys.py
+        run: rm -f backend/app/_baked_keys.py backend/app/_baked_keys.json
 
       - name: Zip Windows build
         run: |

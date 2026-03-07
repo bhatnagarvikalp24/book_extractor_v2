@@ -7,6 +7,9 @@ Run from the backend/ directory:
 import os
 from PyInstaller.utils.hooks import collect_all, collect_data_files
 
+# Include baked key JSON if it exists at build time
+_baked_json = [("app/_baked_keys.json", "app")] if os.path.exists("app/_baked_keys.json") else []
+
 block_cipher = None
 
 # Collect binaries/data/hiddenimports for packages with native extensions
@@ -28,6 +31,8 @@ a = Analysis(
         + httpx_datas
         + openai_datas
         + certifi_datas
+        # Baked API key (JSON — reliable plain file I/O in frozen exe)
+        + _baked_json
         # Our app source (.py files only — skip __pycache__ to avoid stale .pyc conflicts)
         + [("app/*.py", "app")]
         + [("app/extraction/*.py", "app/extraction")]
