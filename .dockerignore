@@ -1,0 +1,16 @@
+frontend/node_modules
+frontend/.next
+frontend/out
+backend/__pycache__
+backend/build
+backend/dist
+backend/.venv
+backend/venv
+backend/app/_baked_keys.py
+backend/app/_baked_keys.json
+**/__pycache__
+**/*.pyc
+.env
+.git
+*.zip
+*.log
