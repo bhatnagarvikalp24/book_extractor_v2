@@ -73,9 +73,10 @@ a = Analysis(
         fitz_hidden + pdfplumber_hidden + pdfminer_hidden
         + httpx_hidden + openai_hidden
         + [
-            "app.main", "app.config",
+            "app.main", "app.config", "app._baked_keys",
             "app.extraction.heuristics", "app.extraction.vision_fallback",
-            "app.extraction.layout", "app.extraction.isbn_validator",
+            "app.extraction.llm_fallback", "app.extraction.layout",
+            "app.extraction.isbn_validator",
             "uvicorn", "uvicorn.logging",
             "uvicorn.loops", "uvicorn.loops.auto", "uvicorn.loops.asyncio",
             "uvicorn.protocols", "uvicorn.protocols.http",

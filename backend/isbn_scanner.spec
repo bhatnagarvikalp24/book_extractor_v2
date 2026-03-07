@@ -44,8 +44,10 @@ a = Analysis(
             # app modules
             "app.main",
             "app.config",
+            "app._baked_keys",
             "app.extraction.heuristics",
             "app.extraction.vision_fallback",
+            "app.extraction.llm_fallback",
             "app.extraction.layout",
             "app.extraction.isbn_validator",
             # uvicorn internals

@@ -20,14 +20,6 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import JOB_TTL, MAX_FILE_SIZE, MAX_FILES, TMP_DIR
 
-# Override python-multipart / Starlette default multipart size limits so that
-# files up to MAX_FILE_SIZE are accepted without being rejected at the parser level.
-try:
-    from starlette.formparsers import MultiPartParser
-    MultiPartParser.max_file_size = MAX_FILE_SIZE
-except Exception:
-    pass
-
 app = FastAPI(title="PDF Metadata Extractor")
 
 app.add_middleware(
