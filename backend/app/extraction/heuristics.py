@@ -80,6 +80,22 @@ AUTHOR_COPYRIGHT_RE = re.compile(
     r"|copyright\s+reserved\s+with\s+(?:the\s+)?author",
     re.IGNORECASE,
 )
+EDITOR_COPYRIGHT_RE = re.compile(
+    r"©\s*(?:the\s+)?editor"
+    r"|all\s+rights\s+reserved\s+with\s+(?:the\s+)?editor"
+    r"|rights?\s+(?:reserved|vest)\s+with\s+(?:the\s+)?editor",
+    re.IGNORECASE,
+)
+# Extracts entity name after ©: "© 2024 National Book Trust" → "National Book Trust"
+_COPYRIGHT_ENTITY_RE = re.compile(
+    r"©\s*(?:\d{4}\s+)?([A-Za-z][A-Za-z0-9\s&.,'\-]{2,80})",
+)
+# Generic words that shouldn't be stored as entity names
+_GENERIC_COPYRIGHT_WORDS = re.compile(
+    r"^(publisher|author|editor|reserved|all rights|copyright"
+    r"|the publisher|the author|the editor)$",
+    re.IGNORECASE,
+)
 
 
 # ── span grouping ────────────────────────────────────────────────────────────
@@ -463,23 +479,37 @@ def extract_copyright(pages: List[Dict]) -> Tuple[str, Optional[Dict]]:
                         break
 
             holder = "unknown"
+            cl = combined.lower()
             if PUBLISHER_COPYRIGHT_RE.search(combined):
                 holder = "publisher"
             elif AUTHOR_COPYRIGHT_RE.search(combined):
                 holder = "author"
-            # "All rights reserved with the Publisher" — very common phrase here
+            elif EDITOR_COPYRIGHT_RE.search(combined):
+                holder = "editor"
             elif re.search(r"all\s+rights\s+reserved", combined, re.IGNORECASE):
-                if "publisher" in combined.lower():
+                if "publisher" in cl:
                     holder = "publisher"
-                elif "author" in combined.lower():
+                elif "author" in cl:
                     holder = "author"
+                elif "editor" in cl:
+                    holder = "editor"
                 else:
-                    # Default for "all rights reserved" without explicit holder
-                    holder = "publisher"
-            elif "publisher" in combined.lower():
+                    holder = "reserved"
+            elif "publisher" in cl:
                 holder = "publisher"
-            elif "author" in combined.lower():
+            elif "author" in cl:
                 holder = "author"
+            elif "editor" in cl:
+                holder = "editor"
+
+            # If still unknown, try to extract the actual entity name after ©
+            # e.g. "© National Book Trust" → "National Book Trust"
+            if holder == "unknown":
+                m = _COPYRIGHT_ENTITY_RE.search(combined)
+                if m:
+                    entity = m.group(1).strip().rstrip(".,")
+                    if entity and not _GENERIC_COPYRIGHT_WORDS.match(entity):
+                        holder = entity
 
             return holder, {"text": combined.strip(), "page": page_num, "bbox": line["bbox"]}
 
