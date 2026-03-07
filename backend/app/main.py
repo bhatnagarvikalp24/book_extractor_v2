@@ -217,6 +217,22 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/api-status")
+def api_status():
+    """Diagnostic: check if OpenAI key is loaded and valid."""
+    import os
+    key = os.getenv("OPENAI_API_KEY", "")
+    if not key:
+        return {"key_loaded": False, "error": "OPENAI_API_KEY not set"}
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=key)
+        client.models.list()
+        return {"key_loaded": True, "key_prefix": key[:12] + "...", "error": None}
+    except Exception as e:
+        return {"key_loaded": True, "key_prefix": key[:12] + "...", "error": str(e)}
+
+
 # ── Serve the static frontend (must come last) ────────────────────────────────
 
 def _find_frontend_dir() -> str:

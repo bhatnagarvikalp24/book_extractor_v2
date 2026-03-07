@@ -611,6 +611,9 @@ def extract_metadata(pdf_path: str, file_name: str) -> Dict[str, Any]:
         "error": None,
     }
 
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
     # LLM fallback for low-confidence or missing fields
     if needs_review and os.getenv("OPENAI_API_KEY"):
         try:
@@ -620,8 +623,8 @@ def extract_metadata(pdf_path: str, file_name: str) -> Dict[str, Any]:
             if llm_result:
                 result.update(llm_result)
                 result["llm_used"] = True
-        except Exception:
-            pass  # deterministic result is still returned
+        except Exception as _e:
+            _log.warning("llm_extract failed for %s: %s", file_name, _e, exc_info=True)
 
     # Vision fallback: use GPT-4o with rendered page images when:
     #  • title is garbled (legacy Devanagari-as-ASCII) or completely missing
@@ -633,6 +636,10 @@ def extract_metadata(pdf_path: str, file_name: str) -> Dict[str, Any]:
         or not result.get("publisher")
         or not title_val
         or _looks_garbled(title_val)
+    )
+    _log.info(
+        "vision check — file=%s still_missing=%s key_set=%s garbled=%s",
+        file_name, still_missing, bool(os.getenv("OPENAI_API_KEY")), _looks_garbled(title_val),
     )
     if still_missing and os.getenv("OPENAI_API_KEY"):
         try:
@@ -657,8 +664,10 @@ def extract_metadata(pdf_path: str, file_name: str) -> Dict[str, Any]:
                     result["confidence"] = vision_result["confidence"]
                 result["needs_review"] = vision_result.get("needs_review", result["needs_review"])
                 result["llm_used"] = True
-        except Exception:
-            pass
+            else:
+                _log.warning("vision_extract returned None for %s", file_name)
+        except Exception as _e:
+            _log.warning("vision_extract raised for %s: %s", file_name, _e, exc_info=True)
 
     return result
 
