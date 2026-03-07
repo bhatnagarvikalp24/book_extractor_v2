@@ -20,6 +20,14 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import JOB_TTL, MAX_FILE_SIZE, MAX_FILES, TMP_DIR
 
+# Override python-multipart / Starlette default multipart size limits so that
+# files up to MAX_FILE_SIZE are accepted without being rejected at the parser level.
+try:
+    from starlette.formparsers import MultiPartParser
+    MultiPartParser.max_file_size = MAX_FILE_SIZE
+except Exception:
+    pass
+
 app = FastAPI(title="PDF Metadata Extractor")
 
 app.add_middleware(
@@ -109,12 +117,6 @@ async def create_extract_job(files: List[UploadFile] = File(...)):
         if not (upload.filename or "").lower().endswith(".pdf"):
             raise HTTPException(400, f"'{upload.filename}' is not a PDF file")
 
-        content = await upload.read()
-        if len(content) > MAX_FILE_SIZE:
-            raise HTTPException(
-                400, f"'{upload.filename}' exceeds the {MAX_FILE_SIZE // (1024*1024)} MB size limit"
-            )
-
         safe_name = _safe_filename(upload.filename or "file.pdf")
         dest = os.path.join(job_dir, safe_name)
         if os.path.exists(dest):
@@ -122,8 +124,26 @@ async def create_extract_job(files: List[UploadFile] = File(...)):
             safe_name = f"{base}_{len(saved)}{ext}"
             dest = os.path.join(job_dir, safe_name)
 
+        # Stream to disk in 1 MB chunks — avoids loading large PDFs into RAM
+        size = 0
+        CHUNK = 1024 * 1024  # 1 MB
         async with aiofiles.open(dest, "wb") as fp:
-            await fp.write(content)
+            while True:
+                chunk = await upload.read(CHUNK)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_FILE_SIZE:
+                    await fp.aclose()
+                    os.remove(dest)
+                    shutil.rmtree(job_dir, ignore_errors=True)
+                    raise HTTPException(
+                        400,
+                        f"'{upload.filename}' exceeds the "
+                        f"{MAX_FILE_SIZE // (1024 * 1024)} MB size limit",
+                    )
+                await fp.write(chunk)
+
         saved.append((safe_name, dest))
 
     # Create job state

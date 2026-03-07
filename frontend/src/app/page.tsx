@@ -150,7 +150,7 @@ function UploadZone({
           Drag &amp; drop PDFs here, or click to browse
         </p>
         <p className="text-slate-400 text-sm mt-1">
-          Max {MAX_FILES} files &bull; 20 MB each &bull; PDF only
+          Max {MAX_FILES} files &bull; 300 MB each &bull; PDF only
         </p>
       </div>
 

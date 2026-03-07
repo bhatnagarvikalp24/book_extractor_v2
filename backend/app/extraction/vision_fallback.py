@@ -158,5 +158,9 @@ def vision_extract(pdf_path: str, current_result: Dict[str, Any]) -> Optional[Di
         }
         return {k: v for k, v in data.items() if k in allowed}
 
-    except Exception:
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "vision_extract failed for %s: %s", pdf_path, exc, exc_info=True
+        )
         return None

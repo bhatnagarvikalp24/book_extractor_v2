@@ -623,13 +623,16 @@ def extract_metadata(pdf_path: str, file_name: str) -> Dict[str, Any]:
         except Exception:
             pass  # deterministic result is still returned
 
-    # Vision fallback: use GPT-4o with rendered page images when text extraction
-    # fails to find the author or publisher, or when the title is garbled
-    # (legacy Devanagari-as-ASCII encoding or image-only PDFs).
+    # Vision fallback: use GPT-4o with rendered page images when:
+    #  • title is garbled (legacy Devanagari-as-ASCII) or completely missing
+    #  • author or publisher is missing
+    # This covers Hindi/Devanagari PDFs and image-only PDFs.
+    title_val = result.get("title") or ""
     still_missing = (
         not result.get("author")
         or not result.get("publisher")
-        or _looks_garbled(result.get("title") or "")
+        or not title_val
+        or _looks_garbled(title_val)
     )
     if still_missing and os.getenv("OPENAI_API_KEY"):
         try:
