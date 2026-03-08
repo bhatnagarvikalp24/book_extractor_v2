@@ -86,9 +86,11 @@ EDITOR_COPYRIGHT_RE = re.compile(
     r"|rights?\s+(?:reserved|vest)\s+with\s+(?:the\s+)?editor",
     re.IGNORECASE,
 )
-# Extracts entity name after ©: "© 2024 National Book Trust" → "National Book Trust"
+# Extracts entity name after © or "copyright" word:
+# "© 2024 National Book Trust" / "Copyright 2016 National Book Trust" → "National Book Trust"
 _COPYRIGHT_ENTITY_RE = re.compile(
-    r"©\s*(?:\d{4}\s+)?([A-Za-z][A-Za-z0-9\s&.,'\-]{2,80})",
+    r"(?:©|copyright)\s*(?:\d{4}\s+)?([A-Za-z][A-Za-z0-9\s&.,'\-]{2,80})",
+    re.IGNORECASE,
 )
 # Generic words that shouldn't be stored as entity names
 _GENERIC_COPYRIGHT_WORDS = re.compile(
@@ -673,6 +675,9 @@ def extract_metadata(pdf_path: str, file_name: str) -> Dict[str, Any]:
 
             llm_result = llm_extract(pages, result)
             if llm_result:
+                # Don't let LLM hallucinate copyright when no copyright line exists in PDF
+                if copyright_info is None:
+                    llm_result.pop("copyright_holder", None)
                 result.update(llm_result)
                 result["llm_used"] = True
         except Exception as _e:
@@ -707,9 +712,15 @@ def extract_metadata(pdf_path: str, file_name: str) -> Dict[str, Any]:
                     elif field == "title" and vval and _looks_garbled(cur or ""):
                         # Deterministic title looks garbled (Devanagari/image) — trust vision
                         result[field] = vval
-                # Update copyright_holder when still unknown
+                # Update copyright_holder when still unknown — but only if
+                # a copyright line was actually found in the PDF (not LLM guess)
                 vcr = vision_result.get("copyright_holder")
-                if result.get("copyright_holder") == "unknown" and vcr and vcr != "unknown":
+                if (
+                    copyright_info is not None
+                    and result.get("copyright_holder") == "unknown"
+                    and vcr
+                    and vcr != "unknown"
+                ):
                     result["copyright_holder"] = vcr
                 # Update confidence and needs_review from vision
                 if vision_result.get("confidence", 0) > result.get("confidence", 0):
