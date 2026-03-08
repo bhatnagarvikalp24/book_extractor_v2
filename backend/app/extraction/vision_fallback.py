@@ -41,10 +41,14 @@ Rules:
 
 
 def render_pages_as_b64(pdf_path: str, page_indices: List[int], scale: float = 1.5) -> List[str]:
-    """Render PDF pages as base64-encoded JPEG strings."""
+    """Render PDF pages as base64-encoded JPEG strings (PNG fallback)."""
+    import logging
+    _log = logging.getLogger(__name__)
+
     try:
         import fitz  # PyMuPDF
     except ImportError:
+        _log.warning("render_pages_as_b64: fitz not available")
         return []
 
     images: List[str] = []
@@ -54,12 +58,23 @@ def render_pages_as_b64(pdf_path: str, page_indices: List[int], scale: float = 1
         for idx in page_indices:
             if idx >= len(doc):
                 continue
-            pix = doc[idx].get_pixmap(matrix=mat, alpha=False)
-            b64 = base64.b64encode(pix.tobytes("jpeg")).decode("utf-8")
-            images.append(b64)
+            try:
+                pix = doc[idx].get_pixmap(matrix=mat, alpha=False)
+                try:
+                    data = pix.tobytes("jpeg")
+                    mime = "jpeg"
+                except Exception:
+                    # JPEG not available in this build — fall back to PNG
+                    data = pix.tobytes("png")
+                    mime = "png"
+                b64 = base64.b64encode(data).decode("utf-8")
+                images.append(f"data:image/{mime};base64,{b64}")
+            except Exception as e:
+                _log.warning("render page %d failed for %s: %s", idx, pdf_path, e)
         doc.close()
-    except Exception:
-        pass
+    except Exception as e:
+        _log.warning("render_pages_as_b64 failed for %s: %s", pdf_path, e, exc_info=True)
+    _log.info("render_pages_as_b64: %d pages rendered for %s", len(images), pdf_path)
     return images
 
 
@@ -98,11 +113,11 @@ def vision_extract(pdf_path: str, current_result: Dict[str, Any]) -> Optional[Di
             ),
         }
     ]
-    for b64 in images:
+    for data_uri in images:
         content.append(
             {
                 "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{b64}", "detail": "high"},
+                "image_url": {"url": data_uri, "detail": "high"},
             }
         )
 
