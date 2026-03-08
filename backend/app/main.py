@@ -138,13 +138,15 @@ async def create_extract_job(files: List[UploadFile] = File(...)):
 
         saved.append((safe_name, dest))
 
-    # Create job state
+    # Create job state — preserve upload order for deterministic CSV export
+    upload_order = {name: i for i, (name, _) in enumerate(saved)}
     with _jobs_lock:
         _jobs[job_id] = {
             "status": "running",
             "total_files": len(saved),
             "processed_files": 0,
             "results": [],
+            "upload_order": upload_order,
             "created_at": time.time(),
         }
 
@@ -178,7 +180,11 @@ def get_results(job_id: str):
 @app.get("/extract/{job_id}/export")
 def export_results(job_id: str, format: str = Query("csv", pattern="^(csv|json)$")):
     job = _get_job(job_id)
-    results = job.get("results", [])
+    upload_order = job.get("upload_order", {})
+    results = sorted(
+        job.get("results", []),
+        key=lambda r: upload_order.get(r.get("file_name", ""), 9999),
+    )
 
     if format == "json":
         content = json.dumps(results, indent=2, ensure_ascii=False)
