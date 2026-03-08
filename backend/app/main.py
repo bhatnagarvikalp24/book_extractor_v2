@@ -191,6 +191,7 @@ def export_results(job_id: str, format: str = Query("csv", pattern="^(csv|json)$
         )
 
     output = io.StringIO()
+    output.write('\ufeff')  # UTF-8 BOM — tells Excel to open as UTF-8
     fieldnames = [
         "file_name", "title", "author", "publisher", "isbn",
         "copyright_holder", "confidence", "llm_used", "needs_review", "error",
@@ -203,9 +204,10 @@ def export_results(job_id: str, format: str = Query("csv", pattern="^(csv|json)$
         flat["needs_review"] = "yes" if flat.get("needs_review") else "no"
         writer.writerow(flat)
 
+    csv_bytes = output.getvalue().encode("utf-8")
     return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv",
+        iter([csv_bytes]),
+        media_type="text/csv; charset=utf-8",
         headers={
             "Content-Disposition": f'attachment; filename="results_{job_id[:8]}.csv"'
         },
