@@ -110,7 +110,9 @@ def group_into_lines(spans: List[Dict], y_tolerance: float = 4.0) -> List[Dict]:
 
     for span in sorted_spans[1:]:
         if abs(span["bbox"][1] - current[0]["bbox"][1]) <= y_tolerance:
-            current.append(span)
+            # Skip duplicate span text within the same line (design-layer repetition)
+            if span["text"].strip() not in {s["text"].strip() for s in current}:
+                current.append(span)
         else:
             lines.append(current)
             current = [span]
@@ -203,6 +205,17 @@ def extract_title(pages: List[Dict]) -> Optional[Dict]:
 
         if not any(l is best for l in cluster):
             cluster = [best]
+
+        # Deduplicate: some PDFs render the title multiple times as a design
+        # layer (watermark effect). Keep only unique consecutive lines.
+        seen: set = set()
+        deduped = []
+        for l in cluster:
+            t = l["text"].strip()
+            if t not in seen:
+                seen.add(t)
+                deduped.append(l)
+        cluster = deduped
 
         combined_text = " ".join(l["text"].strip() for l in cluster).strip()
         if combined_text and len(combined_text) > 1:
@@ -537,9 +550,18 @@ def _looks_garbled(text: str) -> bool:
     # Extended Latin / Latin-1 Supplement characters (0x80–0xFF) are a strong signal
     if any(0x80 <= ord(c) <= 0xFF for c in text):
         return True
-    # Known garbled Devanagari-as-ASCII patterns
+    # Known garbled Devanagari-as-ASCII symbol patterns
     if _GARBLED_RE.search(text):
         return True
+    # Mixed-case within words: legacy Hindi fonts map chars to uppercase letters
+    # mid-word — e.g. "LoLFk", "fgUnh", "dSls". Count words where an uppercase
+    # letter appears after the first character. If >30% of multi-char words have
+    # this pattern, the text is very likely garbled transliteration.
+    words = [w for w in text.split() if len(w) > 2 and w.isalpha()]
+    if words:
+        mid_upper = sum(1 for w in words if any(c.isupper() for c in w[1:]))
+        if mid_upper / len(words) > 0.30:
+            return True
     # Starts with a digit — only garbled if the rest is very short or also garbled
     # (avoids false positives like "157 FAMOUS STORIES OF TAGORE")
     if text[0].isdigit():
